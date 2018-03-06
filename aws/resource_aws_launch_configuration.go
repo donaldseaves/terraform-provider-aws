@@ -170,8 +170,12 @@ func resourceAwsLaunchConfiguration() *schema.Resource {
 						},
 
 						"device_name": {
-							Type:     schema.TypeString,
-							Required: true,
+							Type: schema.TypeString,
+							//SYMANTEC ODIN: Changed Required to Optional
+							// Required check breaks, when a TypeMap is generated
+							// directly in golang, such as from the OdinContext
+							//Required: true,
+							Optional: true,
 							ForceNew: true,
 						},
 
