@@ -214,12 +214,12 @@ func resourceAwsLaunchConfiguration() *schema.Resource {
 					Schema: map[string]*schema.Schema{
 						"device_name": {
 							Type:     schema.TypeString,
-							Optional: true,  //SYMANTEC ODIN
+							Optional: true, //SYMANTEC ODIN
 						},
 
 						"virtual_name": {
 							Type:     schema.TypeString,
-							Optional: true,  //SYMANTEC ODIN
+							Optional: true, //SYMANTEC ODIN
 						},
 					},
 				},
