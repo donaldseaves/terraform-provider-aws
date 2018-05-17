@@ -31,6 +31,7 @@ func init() {
 			"aws_lambda_function",
 			"aws_mq_broker",
 			"aws_redshift_cluster",
+			"aws_spot_fleet_request",
 		},
 	})
 }
@@ -54,6 +55,10 @@ func testSweepSubnets(region string) error {
 	}
 	resp, err := conn.DescribeSubnets(req)
 	if err != nil {
+		if testSweepSkipSweepError(err) {
+			log.Printf("[WARN] Skipping EC2 Subnet sweep for %s: %s", region, err)
+			return nil
+		}
 		return fmt.Errorf("Error describing subnets: %s", err)
 	}
 
