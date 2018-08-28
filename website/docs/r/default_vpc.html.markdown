@@ -53,8 +53,9 @@ You can resume managing the VPC via the AWS Console.
 
 ## Attributes Reference
 
-The following attributes are exported:
+In addition to all arguments above, the following attributes are exported:
 
+* `arn` - Amazon Resource Name (ARN) of VPC
 * `id` - The ID of the VPC
 * `cidr_block` - The CIDR block of the VPC
 * `instance_tenancy` - Tenancy of instances spin up within VPC.

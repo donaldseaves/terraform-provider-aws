@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/arn"
 	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/service/rds"
 	"github.com/hashicorp/terraform/helper/resource"
@@ -33,6 +32,10 @@ func resourceAwsRDSCluster() *schema.Resource {
 		},
 
 		Schema: map[string]*schema.Schema{
+			"arn": {
+				Type:     schema.TypeString,
+				Computed: true,
+			},
 
 			"availability_zones": {
 				Type:     schema.TypeSet,
@@ -58,11 +61,12 @@ func resourceAwsRDSCluster() *schema.Resource {
 				ValidateFunc:  validateRdsIdentifier,
 			},
 			"cluster_identifier_prefix": {
-				Type:         schema.TypeString,
-				Optional:     true,
-				Computed:     true,
-				ForceNew:     true,
-				ValidateFunc: validateRdsIdentifierPrefix,
+				Type:          schema.TypeString,
+				Optional:      true,
+				Computed:      true,
+				ForceNew:      true,
+				ConflictsWith: []string{"cluster_identifier"},
+				ValidateFunc:  validateRdsIdentifierPrefix,
 			},
 
 			"cluster_members": {
@@ -116,6 +120,17 @@ func resourceAwsRDSCluster() *schema.Resource {
 				ValidateFunc: validateRdsEngine(),
 			},
 
+			"engine_mode": {
+				Type:     schema.TypeString,
+				Optional: true,
+				ForceNew: true,
+				Default:  "provisioned",
+				ValidateFunc: validation.StringInSlice([]string{
+					"provisioned",
+					"serverless",
+				}, false),
+			},
+
 			"engine_version": {
 				Type:     schema.TypeString,
 				Optional: true,
@@ -123,11 +138,58 @@ func resourceAwsRDSCluster() *schema.Resource {
 				Computed: true,
 			},
 
+			"scaling_configuration": {
+				Type:     schema.TypeList,
+				Optional: true,
+				MaxItems: 1,
+				DiffSuppressFunc: func(k, old, new string, d *schema.ResourceData) bool {
+					if old == "1" && new == "0" {
+						return true
+					}
+					return false
+				},
+				Elem: &schema.Resource{
+					Schema: map[string]*schema.Schema{
+						"auto_pause": {
+							Type:     schema.TypeBool,
+							Optional: true,
+							Default:  true,
+						},
+						"max_capacity": {
+							Type:     schema.TypeInt,
+							Optional: true,
+							Default:  16,
+						},
+						"min_capacity": {
+							Type:     schema.TypeInt,
+							Optional: true,
+							Default:  2,
+						},
+						"seconds_until_auto_pause": {
+							Type:         schema.TypeInt,
+							Optional:     true,
+							Default:      300,
+							ValidateFunc: validation.IntBetween(300, 86400),
+						},
+					},
+				},
+			},
+
 			"storage_encrypted": {
 				Type:     schema.TypeBool,
 				Optional: true,
-				Default:  false,
 				ForceNew: true,
+				DiffSuppressFunc: func(k, old, new string, d *schema.ResourceData) bool {
+					// Allow configuration to be unset when using engine_mode serverless, as its required to be true
+					// InvalidParameterCombination: Aurora Serverless DB clusters are always encrypted at rest. Encryption can't be disabled.
+					if d.Get("engine_mode").(string) != "serverless" {
+						return false
+					}
+					if new != "false" {
+						return false
+					}
+					return true
+				},
 			},
 
 			"s3_import": {
@@ -301,6 +363,21 @@ func resourceAwsRDSCluster() *schema.Resource {
 				ForceNew: true,
 			},
 
+			"enabled_cloudwatch_logs_exports": {
+				Type:     schema.TypeList,
+				Computed: false,
+				Optional: true,
+				Elem: &schema.Schema{
+					Type: schema.TypeString,
+					ValidateFunc: validation.StringInSlice([]string{
+						"audit",
+						"error",
+						"general",
+						"slowquery",
+					}, false),
+				},
+			},
+
 			"tags": tagsSchema(),
 		},
 	}
@@ -334,10 +411,12 @@ func resourceAwsRDSClusterCreate(d *schema.ResourceData, meta interface{}) error
 
 	if _, ok := d.GetOk("snapshot_identifier"); ok {
 		opts := rds.RestoreDBClusterFromSnapshotInput{
-			DBClusterIdentifier: aws.String(d.Get("cluster_identifier").(string)),
-			Engine:              aws.String(d.Get("engine").(string)),
-			SnapshotIdentifier:  aws.String(d.Get("snapshot_identifier").(string)),
-			Tags:                tags,
+			DBClusterIdentifier:  aws.String(d.Get("cluster_identifier").(string)),
+			Engine:               aws.String(d.Get("engine").(string)),
+			EngineMode:           aws.String(d.Get("engine_mode").(string)),
+			ScalingConfiguration: expandRdsScalingConfiguration(d.Get("scaling_configuration").([]interface{})),
+			SnapshotIdentifier:   aws.String(d.Get("snapshot_identifier").(string)),
+			Tags:                 tags,
 		}
 
 		// Need to check value > 0 due to:
@@ -368,6 +447,10 @@ func resourceAwsRDSClusterCreate(d *schema.ResourceData, meta interface{}) error
 
 		if attr, ok := d.GetOk("port"); ok {
 			opts.Port = aws.Int64(int64(attr.(int)))
+		}
+
+		if attr, ok := d.GetOk("enabled_cloudwatch_logs_exports"); ok && len(attr.([]interface{})) > 0 {
+			opts.EnableCloudwatchLogsExports = expandStringList(attr.([]interface{}))
 		}
 
 		// Check if any of the parameters that require a cluster modification after creation are set
@@ -434,9 +517,10 @@ func resourceAwsRDSClusterCreate(d *schema.ResourceData, meta interface{}) error
 		createOpts := &rds.CreateDBClusterInput{
 			DBClusterIdentifier:         aws.String(d.Get("cluster_identifier").(string)),
 			Engine:                      aws.String(d.Get("engine").(string)),
-			StorageEncrypted:            aws.Bool(d.Get("storage_encrypted").(bool)),
+			EngineMode:                  aws.String(d.Get("engine_mode").(string)),
 			ReplicationSourceIdentifier: aws.String(d.Get("replication_source_identifier").(string)),
-			Tags: tags,
+			ScalingConfiguration:        expandRdsScalingConfiguration(d.Get("scaling_configuration").([]interface{})),
+			Tags:                        tags,
 		}
 
 		// Need to check value > 0 due to:
@@ -489,6 +573,14 @@ func resourceAwsRDSClusterCreate(d *schema.ResourceData, meta interface{}) error
 			createOpts.SourceRegion = aws.String(attr.(string))
 		}
 
+		if attr, ok := d.GetOkExists("storage_encrypted"); ok {
+			createOpts.StorageEncrypted = aws.Bool(attr.(bool))
+		}
+
+		if attr, ok := d.GetOk("enabled_cloudwatch_logs_exports"); ok && len(attr.([]interface{})) > 0 {
+			createOpts.EnableCloudwatchLogsExports = expandStringList(attr.([]interface{}))
+		}
+
 		log.Printf("[DEBUG] Create RDS Cluster as read replica: %s", createOpts)
 		var resp *rds.CreateDBClusterOutput
 		err := resource.Retry(1*time.Minute, func() *resource.RetryError {
@@ -526,7 +618,6 @@ func resourceAwsRDSClusterCreate(d *schema.ResourceData, meta interface{}) error
 			S3Prefix:            aws.String(s3_bucket["bucket_prefix"].(string)),
 			SourceEngine:        aws.String(s3_bucket["source_engine"].(string)),
 			SourceEngineVersion: aws.String(s3_bucket["source_engine_version"].(string)),
-			StorageEncrypted:    aws.Bool(d.Get("storage_encrypted").(bool)),
 			Tags:                tags,
 		}
 
@@ -584,10 +675,24 @@ func resourceAwsRDSClusterCreate(d *schema.ResourceData, meta interface{}) error
 			createOpts.EnableIAMDatabaseAuthentication = aws.Bool(attr.(bool))
 		}
 
+		if attr, ok := d.GetOk("enabled_cloudwatch_logs_exports"); ok && len(attr.([]interface{})) > 0 {
+			createOpts.EnableCloudwatchLogsExports = expandStringList(attr.([]interface{}))
+		}
+
+		if attr, ok := d.GetOkExists("storage_encrypted"); ok {
+			createOpts.StorageEncrypted = aws.Bool(attr.(bool))
+		}
+
 		log.Printf("[DEBUG] RDS Cluster restore options: %s", createOpts)
+		// Retry for IAM/S3 eventual consistency
 		err := resource.Retry(5*time.Minute, func() *resource.RetryError {
 			resp, err := conn.RestoreDBClusterFromS3(createOpts)
 			if err != nil {
+				// InvalidParameterValue: Files from the specified Amazon S3 bucket cannot be downloaded.
+				// Make sure that you have created an AWS Identity and Access Management (IAM) role that lets Amazon RDS access Amazon S3 for you.
+				if isAWSErr(err, "InvalidParameterValue", "Files from the specified Amazon S3 bucket cannot be downloaded") {
+					return resource.RetryableError(err)
+				}
 				if isAWSErr(err, "InvalidParameterValue", "S3_SNAPSHOT_INGESTION") {
 					return resource.RetryableError(err)
 				}
@@ -615,12 +720,13 @@ func resourceAwsRDSClusterCreate(d *schema.ResourceData, meta interface{}) error
 		}
 
 		createOpts := &rds.CreateDBClusterInput{
-			DBClusterIdentifier: aws.String(d.Get("cluster_identifier").(string)),
-			Engine:              aws.String(d.Get("engine").(string)),
-			MasterUserPassword:  aws.String(d.Get("master_password").(string)),
-			MasterUsername:      aws.String(d.Get("master_username").(string)),
-			StorageEncrypted:    aws.Bool(d.Get("storage_encrypted").(bool)),
-			Tags:                tags,
+			DBClusterIdentifier:  aws.String(d.Get("cluster_identifier").(string)),
+			Engine:               aws.String(d.Get("engine").(string)),
+			EngineMode:           aws.String(d.Get("engine_mode").(string)),
+			MasterUserPassword:   aws.String(d.Get("master_password").(string)),
+			MasterUsername:       aws.String(d.Get("master_username").(string)),
+			ScalingConfiguration: expandRdsScalingConfiguration(d.Get("scaling_configuration").([]interface{})),
+			Tags:                 tags,
 		}
 
 		// Need to check value > 0 due to:
@@ -675,6 +781,18 @@ func resourceAwsRDSClusterCreate(d *schema.ResourceData, meta interface{}) error
 
 		if attr, ok := d.GetOk("iam_database_authentication_enabled"); ok {
 			createOpts.EnableIAMDatabaseAuthentication = aws.Bool(attr.(bool))
+		}
+
+		if attr, ok := d.GetOk("enabled_cloudwatch_logs_exports"); ok && len(attr.([]interface{})) > 0 {
+			createOpts.EnableCloudwatchLogsExports = expandStringList(attr.([]interface{}))
+		}
+
+		if attr, ok := d.GetOk("scaling_configuration"); ok && len(attr.([]interface{})) > 0 {
+			createOpts.ScalingConfiguration = expandRdsScalingConfiguration(attr.([]interface{}))
+		}
+
+		if attr, ok := d.GetOkExists("storage_encrypted"); ok {
+			createOpts.StorageEncrypted = aws.Bool(attr.(bool))
 		}
 
 		log.Printf("[DEBUG] RDS Cluster create options: %s", createOpts)
@@ -781,25 +899,34 @@ func flattenAwsRdsClusterResource(d *schema.ResourceData, meta interface{}, dbc 
 		d.Set("database_name", dbc.DatabaseName)
 	}
 
+	d.Set("arn", dbc.DBClusterArn)
 	d.Set("backtrack_window", int(aws.Int64Value(dbc.BacktrackWindow)))
+	d.Set("backup_retention_period", dbc.BackupRetentionPeriod)
 	d.Set("cluster_identifier", dbc.DBClusterIdentifier)
 	d.Set("cluster_resource_id", dbc.DbClusterResourceId)
-	d.Set("db_subnet_group_name", dbc.DBSubnetGroup)
 	d.Set("db_cluster_parameter_group_name", dbc.DBClusterParameterGroup)
+	d.Set("db_subnet_group_name", dbc.DBSubnetGroup)
 	d.Set("endpoint", dbc.Endpoint)
-	d.Set("engine", dbc.Engine)
+	d.Set("engine_mode", dbc.EngineMode)
 	d.Set("engine_version", dbc.EngineVersion)
+	d.Set("engine", dbc.Engine)
+	d.Set("hosted_zone_id", dbc.HostedZoneId)
+	d.Set("iam_database_authentication_enabled", dbc.IAMDatabaseAuthenticationEnabled)
+	d.Set("kms_key_id", dbc.KmsKeyId)
 	d.Set("master_username", dbc.MasterUsername)
 	d.Set("port", dbc.Port)
-	d.Set("storage_encrypted", dbc.StorageEncrypted)
-	d.Set("backup_retention_period", dbc.BackupRetentionPeriod)
 	d.Set("preferred_backup_window", dbc.PreferredBackupWindow)
 	d.Set("preferred_maintenance_window", dbc.PreferredMaintenanceWindow)
-	d.Set("kms_key_id", dbc.KmsKeyId)
 	d.Set("reader_endpoint", dbc.ReaderEndpoint)
 	d.Set("replication_source_identifier", dbc.ReplicationSourceIdentifier)
-	d.Set("iam_database_authentication_enabled", dbc.IAMDatabaseAuthenticationEnabled)
-	d.Set("hosted_zone_id", dbc.HostedZoneId)
+	if err := d.Set("scaling_configuration", flattenRdsScalingConfigurationInfo(dbc.ScalingConfigurationInfo)); err != nil {
+		return fmt.Errorf("error setting scaling_configuration: %s", err)
+	}
+	d.Set("storage_encrypted", dbc.StorageEncrypted)
+
+	if err := d.Set("enabled_cloudwatch_logs_exports", flattenStringList(dbc.EnabledCloudwatchLogsExports)); err != nil {
+		return fmt.Errorf("error setting enabled_cloudwatch_logs_exports: %s", err)
+	}
 
 	var vpcg []string
 	for _, g := range dbc.VpcSecurityGroups {
@@ -827,14 +954,7 @@ func flattenAwsRdsClusterResource(d *schema.ResourceData, meta interface{}, dbc 
 	}
 
 	// Fetch and save tags
-	arn := arn.ARN{
-		Partition: meta.(*AWSClient).partition,
-		Service:   "rds",
-		Region:    meta.(*AWSClient).region,
-		AccountID: meta.(*AWSClient).accountid,
-		Resource:  fmt.Sprintf("cluster:%s", d.Id()),
-	}.String()
-	if err := saveTagsRDS(conn, d, arn); err != nil {
+	if err := saveTagsRDS(conn, d, aws.StringValue(dbc.DBClusterArn)); err != nil {
 		log.Printf("[WARN] Failed to save tags for RDS Cluster (%s): %s", *dbc.DBClusterIdentifier, err)
 	}
 
@@ -892,6 +1012,18 @@ func resourceAwsRDSClusterUpdate(d *schema.ResourceData, meta interface{}) error
 
 	if d.HasChange("iam_database_authentication_enabled") {
 		req.EnableIAMDatabaseAuthentication = aws.Bool(d.Get("iam_database_authentication_enabled").(bool))
+		requestUpdate = true
+	}
+
+	if d.HasChange("enabled_cloudwatch_logs_exports") && !d.IsNewResource() {
+		d.SetPartial("enabled_cloudwatch_logs_exports")
+		req.CloudwatchLogsExportConfiguration = buildCloudwatchLogsExportConfiguration(d)
+		requestUpdate = true
+	}
+
+	if d.HasChange("scaling_configuration") && !d.IsNewResource() {
+		d.SetPartial("scaling_configuration")
+		req.ScalingConfiguration = expandRdsScalingConfiguration(d.Get("scaling_configuration").([]interface{}))
 		requestUpdate = true
 	}
 
@@ -958,17 +1090,13 @@ func resourceAwsRDSClusterUpdate(d *schema.ResourceData, meta interface{}) error
 		}
 	}
 
-	arn := arn.ARN{
-		Partition: meta.(*AWSClient).partition,
-		Service:   "rds",
-		Region:    meta.(*AWSClient).region,
-		AccountID: meta.(*AWSClient).accountid,
-		Resource:  fmt.Sprintf("cluster:%s", d.Id()),
-	}.String()
-	if err := setTagsRDS(conn, d, arn); err != nil {
-		return err
-	} else {
-		d.SetPartial("tags")
+	// Tags are set on creation
+	if !d.IsNewResource() && d.HasChange("tags") {
+		if err := setTagsRDS(conn, d, d.Get("arn").(string)); err != nil {
+			return err
+		} else {
+			d.SetPartial("tags")
+		}
 	}
 
 	return resourceAwsRDSClusterRead(d, meta)

@@ -141,6 +141,7 @@ func resourceAwsSsmDocument() *schema.Resource {
 					},
 				},
 			},
+			"tags": tagsSchema(),
 		},
 	}
 }
@@ -179,6 +180,10 @@ func resourceAwsSsmDocumentCreate(d *schema.ResourceData, meta interface{}) erro
 		}
 	} else {
 		log.Printf("[DEBUG] Not setting permissions for %q", d.Id())
+	}
+
+	if err := setTagsSSM(ssmconn, d, d.Id(), ssm.ResourceTypeForTaggingDocument); err != nil {
+		return fmt.Errorf("error setting SSM Document tags: %s", err)
 	}
 
 	return resourceAwsSsmDocumentRead(d, meta)
@@ -271,10 +276,26 @@ func resourceAwsSsmDocumentRead(d *schema.ResourceData, meta interface{}) error 
 		return err
 	}
 
+	tagList, err := ssmconn.ListTagsForResource(&ssm.ListTagsForResourceInput{
+		ResourceId:   aws.String(d.Id()),
+		ResourceType: aws.String(ssm.ResourceTypeForTaggingDocument),
+	})
+	if err != nil {
+		return fmt.Errorf("error listing SSM Document tags for %s: %s", d.Id(), err)
+	}
+	d.Set("tags", tagsToMapSSM(tagList.TagList))
+
 	return nil
 }
 
 func resourceAwsSsmDocumentUpdate(d *schema.ResourceData, meta interface{}) error {
+	ssmconn := meta.(*AWSClient).ssmconn
+
+	if d.HasChange("tags") {
+		if err := setTagsSSM(ssmconn, d, d.Id(), ssm.ResourceTypeForTaggingDocument); err != nil {
+			return fmt.Errorf("error setting SSM Document tags: %s", err)
+		}
+	}
 
 	if _, ok := d.GetOk("permissions"); ok {
 		if err := setDocumentPermissions(d, meta); err != nil {
@@ -427,10 +448,19 @@ func deleteDocumentPermissions(d *schema.ResourceData, meta interface{}) error {
 
 	log.Printf("[INFO] Removing permissions from document: %s", d.Id())
 
+	permission := d.Get("permissions").(map[string]interface{})
+	var accountsToRemove []*string
+	if permission["account_ids"] != nil {
+		accountsToRemove = aws.StringSlice([]string{permission["account_ids"].(string)})
+		if strings.Contains(permission["account_ids"].(string), ",") {
+			accountsToRemove = aws.StringSlice(strings.Split(permission["account_ids"].(string), ","))
+		}
+	}
+
 	permInput := &ssm.ModifyDocumentPermissionInput{
 		Name:               aws.String(d.Get("name").(string)),
 		PermissionType:     aws.String("Share"),
-		AccountIdsToRemove: aws.StringSlice(strings.Split("all", ",")),
+		AccountIdsToRemove: accountsToRemove,
 	}
 
 	_, err := ssmconn.ModifyDocumentPermission(permInput)

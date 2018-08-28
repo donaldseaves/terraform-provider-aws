@@ -3,16 +3,77 @@ package aws
 import (
 	"errors"
 	"fmt"
+	"log"
 	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/elbv2"
-	"github.com/hashicorp/errwrap"
 	"github.com/hashicorp/terraform/helper/acctest"
 	"github.com/hashicorp/terraform/helper/resource"
 	"github.com/hashicorp/terraform/terraform"
 )
+
+func init() {
+	resource.AddTestSweepers("aws_lb", &resource.Sweeper{
+		Name: "aws_lb",
+		F:    testSweepLBs,
+	})
+}
+
+func testSweepLBs(region string) error {
+	client, err := sharedClientForRegion(region)
+	if err != nil {
+		return fmt.Errorf("error getting client: %s", err)
+	}
+	conn := client.(*AWSClient).elbv2conn
+
+	prefixes := []string{
+		"tf-",
+		"tf-test-",
+		"tf-acc-test-",
+		"test-",
+	}
+
+	err = conn.DescribeLoadBalancersPages(&elbv2.DescribeLoadBalancersInput{}, func(page *elbv2.DescribeLoadBalancersOutput, isLast bool) bool {
+		if page == nil || len(page.LoadBalancers) == 0 {
+			log.Print("[DEBUG] No LBs to sweep")
+			return false
+		}
+
+		for _, loadBalancer := range page.LoadBalancers {
+			name := aws.StringValue(loadBalancer.LoadBalancerName)
+			skip := true
+			for _, prefix := range prefixes {
+				if strings.HasPrefix(name, prefix) {
+					skip = false
+					break
+				}
+			}
+			if skip {
+				log.Printf("[INFO] Skipping LB: %s", name)
+				continue
+			}
+			log.Printf("[INFO] Deleting LB: %s", name)
+			_, err := conn.DeleteLoadBalancer(&elbv2.DeleteLoadBalancerInput{
+				LoadBalancerArn: loadBalancer.LoadBalancerArn,
+			})
+			if err != nil {
+				log.Printf("[ERROR] Failed to delete LB (%s): %s", name, err)
+			}
+		}
+		return !isLast
+	})
+	if err != nil {
+		if testSweepSkipSweepError(err) {
+			log.Printf("[WARN] Skipping LB sweep for %s: %s", region, err)
+			return nil
+		}
+		return fmt.Errorf("Error retrieving LBs: %s", err)
+	}
+	return nil
+}
 
 func TestLBCloudwatchSuffixFromARN(t *testing.T) {
 	cases := []struct {
@@ -646,7 +707,7 @@ func TestAccAWSLB_networkLoadbalancer_subnet_change(t *testing.T) {
 
 func testAccCheckAWSlbARNs(pre, post *elbv2.LoadBalancer) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
-		if *pre.LoadBalancerArn != *post.LoadBalancerArn {
+		if aws.StringValue(pre.LoadBalancerArn) != aws.StringValue(post.LoadBalancerArn) {
 			return errors.New("LB has been recreated. ARNs are different")
 		}
 
@@ -676,7 +737,7 @@ func testAccCheckAWSLBExists(n string, res *elbv2.LoadBalancer) resource.TestChe
 		}
 
 		if len(describe.LoadBalancers) != 1 ||
-			*describe.LoadBalancers[0].LoadBalancerArn != rs.Primary.ID {
+			aws.StringValue(describe.LoadBalancers[0].LoadBalancerArn) != rs.Primary.ID {
 			return errors.New("LB not found")
 		}
 
@@ -701,16 +762,15 @@ func testAccCheckAWSLBAttribute(n, key, value string) resource.TestCheckFunc {
 			LoadBalancerArn: aws.String(rs.Primary.ID),
 		})
 		if err != nil {
-			return errwrap.Wrapf("Error retrieving LB Attributes: {{err}}", err)
+			return fmt.Errorf("Error retrieving LB Attributes: %s", err)
 		}
 
 		for _, attr := range attributesResp.Attributes {
-			if *attr.Key == key {
-				if *attr.Value == value {
+			if aws.StringValue(attr.Key) == key {
+				if aws.StringValue(attr.Value) == value {
 					return nil
-				} else {
-					return fmt.Errorf("LB attribute %s expected: %q actual: %q", key, value, *attr.Value)
 				}
+				return fmt.Errorf("LB attribute %s expected: %q actual: %q", key, value, aws.StringValue(attr.Value))
 			}
 		}
 		return fmt.Errorf("LB attribute %s does not exist on LB: %s", key, rs.Primary.ID)
@@ -731,7 +791,7 @@ func testAccCheckAWSLBDestroy(s *terraform.State) error {
 
 		if err == nil {
 			if len(describe.LoadBalancers) != 0 &&
-				*describe.LoadBalancers[0].LoadBalancerArn == rs.Primary.ID {
+				aws.StringValue(describe.LoadBalancers[0].LoadBalancerArn) == rs.Primary.ID {
 				return fmt.Errorf("LB %q still exists", rs.Primary.ID)
 			}
 		}
@@ -740,7 +800,7 @@ func testAccCheckAWSLBDestroy(s *terraform.State) error {
 		if isLoadBalancerNotFound(err) {
 			return nil
 		} else {
-			return errwrap.Wrapf("Unexpected error checking LB destroyed: {{err}}", err)
+			return fmt.Errorf("Unexpected error checking LB destroyed: %s", err)
 		}
 	}
 
