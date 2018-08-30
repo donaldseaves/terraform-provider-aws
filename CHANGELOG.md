@@ -1,9 +1,20 @@
 ## 1.34.0 (Unreleased)
 
+NOTES:
+
+* provider: This is the first release tested against and built with Go 1.11, which required `go fmt` changes to the code. If you are building a custom version of this provider or running tests using the repository Make targets (e.g. `make build`) when using a previous version of Go, you will receive errors. You can use the underlying `go` commands (e.g. `go build`) to workaround the `go fmt` check in the Make targets until you are able to upgrade Go.
+
+ENHANCEMENTS:
+
+* provider: `NO_PROXY` environment variable can accept CIDR notation and port
+
 BUG FIXES:
 
+* data-source/aws_rds_cluster: Prevent error setting `engine_mode` and `scaling_configuration` [GH-5660]
 * resource/aws_dax_cluster: Properly recreate cluster when updating `server_side_encryption` [GH-5664]
+* resource/aws_lambda_event_source_mapping: Prevent perpetual difference when using function name with `function_name` (argument accepts both name and ARN) [GH-5454]
 * resource/aws_ssm_document: Properly handle deletion of privately shared documents [GH-5668]
+* resource/aws_ssm_document: Properly update `permissions.account_ids` [GH-5685]
 
 ## 1.33.0 (August 22, 2018)
 
