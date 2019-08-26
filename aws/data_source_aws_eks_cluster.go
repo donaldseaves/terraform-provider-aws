@@ -36,6 +36,12 @@ func dataSourceAwsEksCluster() *schema.Resource {
 				Type:     schema.TypeString,
 				Computed: true,
 			},
+			"enabled_cluster_log_types": {
+				Type:     schema.TypeSet,
+				Computed: true,
+				Elem:     &schema.Schema{Type: schema.TypeString},
+				Set:      schema.HashString,
+			},
 			"endpoint": {
 				Type:     schema.TypeString,
 				Computed: true,
@@ -46,7 +52,15 @@ func dataSourceAwsEksCluster() *schema.Resource {
 				ForceNew:     true,
 				ValidateFunc: validation.NoZeroValues,
 			},
+			"platform_version": {
+				Type:     schema.TypeString,
+				Computed: true,
+			},
 			"role_arn": {
+				Type:     schema.TypeString,
+				Computed: true,
+			},
+			"status": {
 				Type:     schema.TypeString,
 				Computed: true,
 			},
@@ -56,6 +70,14 @@ func dataSourceAwsEksCluster() *schema.Resource {
 				Computed: true,
 				Elem: &schema.Resource{
 					Schema: map[string]*schema.Schema{
+						"endpoint_private_access": {
+							Type:     schema.TypeBool,
+							Computed: true,
+						},
+						"endpoint_public_access": {
+							Type:     schema.TypeBool,
+							Computed: true,
+						},
 						"security_group_ids": {
 							Type:     schema.TypeSet,
 							Computed: true,
@@ -108,9 +130,14 @@ func dataSourceAwsEksClusterRead(d *schema.ResourceData, meta interface{}) error
 	}
 
 	d.Set("created_at", aws.TimeValue(cluster.CreatedAt).String())
+	if err := d.Set("enabled_cluster_log_types", flattenEksEnabledLogTypes(cluster.Logging)); err != nil {
+		return fmt.Errorf("error setting enabled_cluster_log_types: %s", err)
+	}
 	d.Set("endpoint", cluster.Endpoint)
 	d.Set("name", cluster.Name)
+	d.Set("platform_version", cluster.PlatformVersion)
 	d.Set("role_arn", cluster.RoleArn)
+	d.Set("status", cluster.Status)
 	d.Set("version", cluster.Version)
 
 	if err := d.Set("vpc_config", flattenEksVpcConfigResponse(cluster.ResourcesVpcConfig)); err != nil {

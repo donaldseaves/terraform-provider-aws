@@ -73,7 +73,7 @@ func TestAccAWSStorageGatewayCachedIscsiVolume_Basic(t *testing.T) {
 	rName := acctest.RandomWithPrefix("tf-acc-test")
 	resourceName := "aws_storagegateway_cached_iscsi_volume.test"
 
-	resource.Test(t, resource.TestCase{
+	resource.ParallelTest(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
 		Providers:    testAccProviders,
 		CheckDestroy: testAccCheckAWSStorageGatewayCachedIscsiVolumeDestroy,
@@ -110,7 +110,7 @@ func TestAccAWSStorageGatewayCachedIscsiVolume_SnapshotId(t *testing.T) {
 	rName := acctest.RandomWithPrefix("tf-acc-test")
 	resourceName := "aws_storagegateway_cached_iscsi_volume.test"
 
-	resource.Test(t, resource.TestCase{
+	resource.ParallelTest(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
 		Providers:    testAccProviders,
 		CheckDestroy: testAccCheckAWSStorageGatewayCachedIscsiVolumeDestroy,
@@ -148,7 +148,7 @@ func TestAccAWSStorageGatewayCachedIscsiVolume_SourceVolumeArn(t *testing.T) {
 	rName := acctest.RandomWithPrefix("tf-acc-test")
 	resourceName := "aws_storagegateway_cached_iscsi_volume.test"
 
-	resource.Test(t, resource.TestCase{
+	resource.ParallelTest(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
 		Providers:    testAccProviders,
 		CheckDestroy: testAccCheckAWSStorageGatewayCachedIscsiVolumeDestroy,
@@ -230,6 +230,9 @@ func testAccCheckAWSStorageGatewayCachedIscsiVolumeDestroy(s *terraform.State) e
 			if isAWSErr(err, storagegateway.ErrorCodeVolumeNotFound, "") {
 				return nil
 			}
+			if isAWSErr(err, storagegateway.ErrCodeInvalidGatewayRequestException, "The specified volume was not found") {
+				return nil
+			}
 			return err
 		}
 
@@ -248,7 +251,7 @@ resource "aws_ebs_volume" "test" {
   size              = 10
   type              = "gp2"
 
-  tags {
+  tags = {
     Name = %q
   }
 }
@@ -295,7 +298,7 @@ resource "aws_ebs_volume" "cachevolume" {
   size              = 10
   type              = "gp2"
 
-  tags {
+  tags = {
     Name = %q
   }
 }
@@ -331,7 +334,7 @@ resource "aws_ebs_volume" "snapvolume" {
   size              = 5
   type              = "gp2"
 
-  tags {
+  tags = {
     Name = %q
   }
 }
@@ -339,7 +342,7 @@ resource "aws_ebs_volume" "snapvolume" {
 resource "aws_ebs_snapshot" "test" {
   volume_id = "${aws_ebs_volume.snapvolume.id}"
 
-  tags {
+  tags = {
     Name = %q
   }
 }
@@ -380,7 +383,7 @@ resource "aws_ebs_volume" "test" {
   size              = 10
   type              = "gp2"
 
-  tags {
+  tags = {
     Name = %q
   }
 }

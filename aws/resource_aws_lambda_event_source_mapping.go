@@ -15,6 +15,7 @@ import (
 
 	"github.com/hashicorp/terraform/helper/resource"
 	"github.com/hashicorp/terraform/helper/schema"
+	"github.com/hashicorp/terraform/helper/validation"
 )
 
 func resourceAwsLambdaEventSourceMapping() *schema.Resource {
@@ -48,6 +49,17 @@ func resourceAwsLambdaEventSourceMapping() *schema.Resource {
 				Type:     schema.TypeString,
 				Optional: true,
 				ForceNew: true,
+				ValidateFunc: validation.StringInSlice([]string{
+					lambda.EventSourcePositionAtTimestamp,
+					lambda.EventSourcePositionLatest,
+					lambda.EventSourcePositionTrimHorizon,
+				}, false),
+			},
+			"starting_position_timestamp": {
+				Type:         schema.TypeString,
+				Optional:     true,
+				ForceNew:     true,
+				ValidateFunc: validation.ValidateRFC3339TimeString,
 			},
 			"batch_size": {
 				Type:     schema.TypeInt,
@@ -136,6 +148,11 @@ func resourceAwsLambdaEventSourceMappingCreate(d *schema.ResourceData, meta inte
 		params.StartingPosition = aws.String(startingPosition.(string))
 	}
 
+	if startingPositionTimestamp, ok := d.GetOk("starting_position_timestamp"); ok {
+		t, _ := time.Parse(time.RFC3339, startingPositionTimestamp.(string))
+		params.StartingPositionTimestamp = aws.Time(t)
+	}
+
 	// IAM profiles and roles can take some time to propagate in AWS:
 	//  http://docs.aws.amazon.com/AWSEC2/latest/UserGuide/iam-roles-for-amazon-ec2.html#launch-instance-with-role-console
 	// Error creating Lambda function: InvalidParameterValueException: The
@@ -143,8 +160,10 @@ func resourceAwsLambdaEventSourceMappingCreate(d *schema.ResourceData, meta inte
 	//
 	// The role may exist, but the permissions may not have propagated, so we
 	// retry
-	err := resource.Retry(5*time.Minute, func() *resource.RetryError {
-		eventSourceMappingConfiguration, err := conn.CreateEventSourceMapping(params)
+	var eventSourceMappingConfiguration *lambda.EventSourceMappingConfiguration
+	var err error
+	err = resource.Retry(5*time.Minute, func() *resource.RetryError {
+		eventSourceMappingConfiguration, err = conn.CreateEventSourceMapping(params)
 		if err != nil {
 			if awserr, ok := err.(awserr.Error); ok {
 				if awserr.Code() == "InvalidParameterValueException" {
@@ -153,16 +172,18 @@ func resourceAwsLambdaEventSourceMappingCreate(d *schema.ResourceData, meta inte
 			}
 			return resource.NonRetryableError(err)
 		}
-		// No error
-		d.Set("uuid", eventSourceMappingConfiguration.UUID)
-		d.SetId(*eventSourceMappingConfiguration.UUID)
 		return nil
 	})
-
+	if isResourceTimeoutError(err) {
+		eventSourceMappingConfiguration, err = conn.CreateEventSourceMapping(params)
+	}
 	if err != nil {
 		return fmt.Errorf("Error creating Lambda event source mapping: %s", err)
 	}
 
+	// No error
+	d.Set("uuid", eventSourceMappingConfiguration.UUID)
+	d.SetId(*eventSourceMappingConfiguration.UUID)
 	return resourceAwsLambdaEventSourceMappingRead(d, meta)
 }
 
@@ -179,7 +200,7 @@ func resourceAwsLambdaEventSourceMappingRead(d *schema.ResourceData, meta interf
 
 	eventSourceMappingConfiguration, err := conn.GetEventSourceMapping(params)
 	if err != nil {
-		if ec2err, ok := err.(awserr.Error); ok && ec2err.Code() == "ResourceNotFoundException" {
+		if isAWSErr(err, "ResourceNotFoundException", "") {
 			log.Printf("[DEBUG] Lambda event source mapping (%s) not found", d.Id())
 			d.SetId("")
 
@@ -233,7 +254,9 @@ func resourceAwsLambdaEventSourceMappingDelete(d *schema.ResourceData, meta inte
 		}
 		return nil
 	})
-
+	if isResourceTimeoutError(err) {
+		_, err = conn.DeleteEventSourceMapping(params)
+	}
 	if err != nil {
 		return fmt.Errorf("Error deleting Lambda event source mapping: %s", err)
 	}
@@ -267,7 +290,9 @@ func resourceAwsLambdaEventSourceMappingUpdate(d *schema.ResourceData, meta inte
 		}
 		return nil
 	})
-
+	if isResourceTimeoutError(err) {
+		_, err = conn.UpdateEventSourceMapping(params)
+	}
 	if err != nil {
 		return fmt.Errorf("Error updating Lambda event source mapping: %s", err)
 	}

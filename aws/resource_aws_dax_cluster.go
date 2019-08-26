@@ -229,6 +229,9 @@ func resourceAwsDaxClusterCreate(d *schema.ResourceData, meta interface{}) error
 		}
 		return nil
 	})
+	if isResourceTimeoutError(err) {
+		resp, err = conn.CreateCluster(req)
+	}
 	if err != nil {
 		return fmt.Errorf("Error creating DAX cluster: %s", err)
 	}
@@ -290,9 +293,9 @@ func resourceAwsDaxClusterRead(d *schema.ResourceData, meta interface{}) error {
 	d.Set("replication_factor", c.TotalNodes)
 
 	if c.ClusterDiscoveryEndpoint != nil {
-		d.Set("port", c.ClusterDiscoveryEndpoint.Port)
-		d.Set("configuration_endpoint", aws.String(fmt.Sprintf("%s:%d", *c.ClusterDiscoveryEndpoint.Address, *c.ClusterDiscoveryEndpoint.Port)))
-		d.Set("cluster_address", aws.String(fmt.Sprintf("%s", *c.ClusterDiscoveryEndpoint.Address)))
+		d.Set("port", aws.Int64Value(c.ClusterDiscoveryEndpoint.Port))
+		d.Set("configuration_endpoint", fmt.Sprintf("%s:%d", aws.StringValue(c.ClusterDiscoveryEndpoint.Address), aws.Int64Value(c.ClusterDiscoveryEndpoint.Port)))
+		d.Set("cluster_address", aws.StringValue(c.ClusterDiscoveryEndpoint.Address))
 	}
 
 	d.Set("subnet_group_name", c.SubnetGroup)
@@ -385,7 +388,7 @@ func resourceAwsDaxClusterUpdate(d *schema.ResourceData, meta interface{}) error
 		log.Printf("[DEBUG] Modifying DAX Cluster (%s), opts:\n%s", d.Id(), req)
 		_, err := conn.UpdateCluster(req)
 		if err != nil {
-			return fmt.Errorf("[WARN] Error updating DAX cluster (%s), error: %s", d.Id(), err)
+			return fmt.Errorf("Error updating DAX cluster (%s), error: %s", d.Id(), err)
 		}
 		awaitUpdate = true
 	}
@@ -401,7 +404,7 @@ func resourceAwsDaxClusterUpdate(d *schema.ResourceData, meta interface{}) error
 				NewReplicationFactor: aws.Int64(int64(nraw.(int))),
 			})
 			if err != nil {
-				return fmt.Errorf("[WARN] Error increasing nodes in DAX cluster %s, error: %s", d.Id(), err)
+				return fmt.Errorf("Error increasing nodes in DAX cluster %s, error: %s", d.Id(), err)
 			}
 			awaitUpdate = true
 		}
@@ -412,7 +415,7 @@ func resourceAwsDaxClusterUpdate(d *schema.ResourceData, meta interface{}) error
 				NewReplicationFactor: aws.Int64(int64(nraw.(int))),
 			})
 			if err != nil {
-				return fmt.Errorf("[WARN] Error increasing nodes in DAX cluster %s, error: %s", d.Id(), err)
+				return fmt.Errorf("Error increasing nodes in DAX cluster %s, error: %s", d.Id(), err)
 			}
 			awaitUpdate = true
 		}
@@ -486,8 +489,11 @@ func resourceAwsDaxClusterDelete(d *schema.ResourceData, meta interface{}) error
 		}
 		return nil
 	})
+	if isResourceTimeoutError(err) {
+		_, err = conn.DeleteCluster(req)
+	}
 	if err != nil {
-		return err
+		return fmt.Errorf("Error deleting DAX cluster: %s", err)
 	}
 
 	log.Printf("[DEBUG] Waiting for deletion: %v", d.Id())
@@ -524,7 +530,7 @@ func daxClusterStateRefreshFunc(conn *dax.DAX, clusterID, givenState string, pen
 		}
 
 		if len(resp.Clusters) == 0 {
-			return nil, "", fmt.Errorf("[WARN] Error: no DAX clusters found for id (%s)", clusterID)
+			return nil, "", fmt.Errorf("Error: no DAX clusters found for id (%s)", clusterID)
 		}
 
 		var c *dax.Cluster
@@ -536,7 +542,7 @@ func daxClusterStateRefreshFunc(conn *dax.DAX, clusterID, givenState string, pen
 		}
 
 		if c == nil {
-			return nil, "", fmt.Errorf("[WARN] Error: no matching DAX cluster for id (%s)", clusterID)
+			return nil, "", fmt.Errorf("Error: no matching DAX cluster for id (%s)", clusterID)
 		}
 
 		// DescribeCluster returns a response without status late on in the

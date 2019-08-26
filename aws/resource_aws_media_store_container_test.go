@@ -12,8 +12,8 @@ import (
 )
 
 func TestAccAWSMediaStoreContainer_basic(t *testing.T) {
-	resource.Test(t, resource.TestCase{
-		PreCheck:     func() { testAccPreCheck(t) },
+	resource.ParallelTest(t, resource.TestCase{
+		PreCheck:     func() { testAccPreCheck(t); testAccPreCheckAWSMediaStore(t) },
 		Providers:    testAccProviders,
 		CheckDestroy: testAccCheckAwsMediaStoreContainerDestroy,
 		Steps: []resource.TestStep{
@@ -27,11 +27,56 @@ func TestAccAWSMediaStoreContainer_basic(t *testing.T) {
 	})
 }
 
+func TestAccAWSMediaStoreContainer_tags(t *testing.T) {
+	rName := acctest.RandString(5)
+	resourceName := "aws_media_store_container.test"
+
+	resource.ParallelTest(t, resource.TestCase{
+		PreCheck:     func() { testAccPreCheck(t); testAccPreCheckAWSMediaStore(t) },
+		Providers:    testAccProviders,
+		CheckDestroy: testAccCheckAwsMediaStoreContainerDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccMediaStoreContainerConfigWithTags(rName, "foo", "bar", "fizz", "buzz"),
+				Check: resource.ComposeTestCheckFunc(
+					testAccCheckAwsMediaStoreContainerExists(resourceName),
+					resource.TestCheckResourceAttr(resourceName, "tags.%", "3"),
+					resource.TestCheckResourceAttr(resourceName, "tags.Name", fmt.Sprintf("tf_mediastore_%s", rName)),
+					resource.TestCheckResourceAttr(resourceName, "tags.foo", "bar"),
+					resource.TestCheckResourceAttr(resourceName, "tags.fizz", "buzz"),
+				),
+			},
+			{
+				Config: testAccMediaStoreContainerConfigWithTags(rName, "foo", "bar2", "fizz2", "buzz2"),
+				Check: resource.ComposeTestCheckFunc(
+					testAccCheckAwsMediaStoreContainerExists(resourceName),
+					resource.TestCheckResourceAttr(resourceName, "tags.%", "3"),
+					resource.TestCheckResourceAttr(resourceName, "tags.Name", fmt.Sprintf("tf_mediastore_%s", rName)),
+					resource.TestCheckResourceAttr(resourceName, "tags.foo", "bar2"),
+					resource.TestCheckResourceAttr(resourceName, "tags.fizz2", "buzz2"),
+				),
+			},
+			{
+				ResourceName:      resourceName,
+				ImportState:       true,
+				ImportStateVerify: true,
+			},
+			{
+				Config: testAccMediaStoreContainerConfig(rName),
+				Check: resource.ComposeTestCheckFunc(
+					testAccCheckAwsMediaStoreContainerExists(resourceName),
+					resource.TestCheckResourceAttr(resourceName, "tags.%", "0"),
+				),
+			},
+		},
+	})
+}
+
 func TestAccAWSMediaStoreContainer_import(t *testing.T) {
 	resourceName := "aws_media_store_container.test"
 
-	resource.Test(t, resource.TestCase{
-		PreCheck:     func() { testAccPreCheck(t) },
+	resource.ParallelTest(t, resource.TestCase{
+		PreCheck:     func() { testAccPreCheck(t); testAccPreCheckAWSMediaStore(t) },
 		Providers:    testAccProviders,
 		CheckDestroy: testAccCheckAwsMediaStoreContainerDestroy,
 		Steps: []resource.TestStep{
@@ -88,11 +133,24 @@ func testAccCheckAwsMediaStoreContainerExists(name string) resource.TestCheckFun
 		}
 
 		_, err := conn.DescribeContainer(input)
-		if err != nil {
-			return err
-		}
 
-		return nil
+		return err
+	}
+}
+
+func testAccPreCheckAWSMediaStore(t *testing.T) {
+	conn := testAccProvider.Meta().(*AWSClient).mediastoreconn
+
+	input := &mediastore.ListContainersInput{}
+
+	_, err := conn.ListContainers(input)
+
+	if testAccPreCheckSkipError(err) {
+		t.Skipf("skipping acceptance testing: %s", err)
+	}
+
+	if err != nil {
+		t.Fatalf("unexpected PreCheck error: %s", err)
 	}
 }
 
@@ -100,5 +158,20 @@ func testAccMediaStoreContainerConfig(rName string) string {
 	return fmt.Sprintf(`
 resource "aws_media_store_container" "test" {
   name = "tf_mediastore_%s"
-}`, rName)
+}
+`, rName)
+}
+
+func testAccMediaStoreContainerConfigWithTags(rName, tagKey1, tagValue1, tagKey2, tagValue2 string) string {
+	return fmt.Sprintf(`
+resource "aws_media_store_container" "test" {
+  name = "tf_mediastore_%[1]s"
+
+  tags = {
+	Name  = "tf_mediastore_%[1]s"
+	%[2]s = %[3]q
+	%[4]s = %[5]q
+  }
+}
+`, rName, tagKey1, tagValue1, tagKey2, tagValue2)
 }

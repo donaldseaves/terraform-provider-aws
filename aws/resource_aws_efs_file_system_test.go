@@ -15,31 +15,12 @@ import (
 	"github.com/hashicorp/terraform/terraform"
 )
 
-func TestResourceAWSEFSFileSystem_validateReferenceName(t *testing.T) {
-	var value string
-	var errors []error
-
-	value = acctest.RandString(128)
-	_, errors = validateReferenceName(value, "reference_name")
-	if len(errors) == 0 {
-		t.Fatalf("Expected to trigger a validation error")
-	}
-
-	value = acctest.RandString(32)
-	_, errors = validateReferenceName(value, "reference_name")
-	if len(errors) != 0 {
-		t.Fatalf("Expected not to trigger a validation error")
-	}
-}
-
 func TestResourceAWSEFSFileSystem_hasEmptyFileSystems(t *testing.T) {
 	fs := &efs.DescribeFileSystemsOutput{
 		FileSystems: []*efs.FileSystemDescription{},
 	}
 
-	var actual bool
-
-	actual = hasEmptyFileSystems(fs)
+	actual := hasEmptyFileSystems(fs)
 	if !actual {
 		t.Fatalf("Expected return value to be true, got %t", actual)
 	}
@@ -54,9 +35,31 @@ func TestResourceAWSEFSFileSystem_hasEmptyFileSystems(t *testing.T) {
 
 }
 
+func TestAccAWSEFSFileSystem_importBasic(t *testing.T) {
+	resourceName := "aws_efs_file_system.foo-with-tags"
+	rInt := acctest.RandInt()
+
+	resource.ParallelTest(t, resource.TestCase{
+		PreCheck:     func() { testAccPreCheck(t) },
+		Providers:    testAccProviders,
+		CheckDestroy: testAccCheckEfsFileSystemDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccAWSEFSFileSystemConfigWithTags(rInt),
+			},
+			{
+				ResourceName:            resourceName,
+				ImportState:             true,
+				ImportStateVerify:       true,
+				ImportStateVerifyIgnore: []string{"creation_token"},
+			},
+		},
+	})
+}
+
 func TestAccAWSEFSFileSystem_basic(t *testing.T) {
 	rInt := acctest.RandInt()
-	resource.Test(t, resource.TestCase{
+	resource.ParallelTest(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
 		Providers:    testAccProviders,
 		CheckDestroy: testAccCheckEfsFileSystemDestroy,
@@ -64,6 +67,7 @@ func TestAccAWSEFSFileSystem_basic(t *testing.T) {
 			{
 				Config: testAccAWSEFSFileSystemConfig,
 				Check: resource.ComposeTestCheckFunc(
+					testAccMatchResourceAttrRegionalARN("aws_efs_file_system.foo", "arn", "elasticfilesystem", regexp.MustCompile(`file-system/fs-.+`)),
 					resource.TestCheckResourceAttr(
 						"aws_efs_file_system.foo",
 						"performance_mode",
@@ -127,7 +131,7 @@ func TestAccAWSEFSFileSystem_basic(t *testing.T) {
 
 func TestAccAWSEFSFileSystem_pagedTags(t *testing.T) {
 	rInt := acctest.RandInt()
-	resource.Test(t, resource.TestCase{
+	resource.ParallelTest(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
 		Providers:    testAccProviders,
 		CheckDestroy: testAccCheckEfsFileSystemDestroy,
@@ -154,8 +158,9 @@ func TestAccAWSEFSFileSystem_pagedTags(t *testing.T) {
 
 func TestAccAWSEFSFileSystem_kmsKey(t *testing.T) {
 	rInt := acctest.RandInt()
-	keyRegex := regexp.MustCompile("^arn:aws:([a-zA-Z0-9\\-])+:([a-z]{2}-[a-z]+-\\d{1})?:(\\d{12})?:(.*)$")
-	resource.Test(t, resource.TestCase{
+	kmsKeyResourceName := "aws_kms_key.foo"
+
+	resource.ParallelTest(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
 		Providers:    testAccProviders,
 		CheckDestroy: testAccCheckEfsFileSystemDestroy,
@@ -163,7 +168,7 @@ func TestAccAWSEFSFileSystem_kmsKey(t *testing.T) {
 			{
 				Config: testAccAWSEFSFileSystemConfigWithKmsKey(rInt),
 				Check: resource.ComposeTestCheckFunc(
-					resource.TestMatchResourceAttr("aws_efs_file_system.foo-with-kms", "kms_key_id", keyRegex),
+					resource.TestCheckResourceAttrPair("aws_efs_file_system.foo-with-kms", "kms_key_id", kmsKeyResourceName, "arn"),
 					resource.TestCheckResourceAttr("aws_efs_file_system.foo-with-kms", "encrypted", "true"),
 				),
 			},
@@ -174,7 +179,7 @@ func TestAccAWSEFSFileSystem_kmsKey(t *testing.T) {
 func TestAccAWSEFSFileSystem_kmsConfigurationWithoutEncryption(t *testing.T) {
 	rInt := acctest.RandInt()
 
-	resource.Test(t, resource.TestCase{
+	resource.ParallelTest(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
 		Providers:    testAccProviders,
 		CheckDestroy: testAccCheckEfsFileSystemDestroy,
@@ -190,7 +195,7 @@ func TestAccAWSEFSFileSystem_kmsConfigurationWithoutEncryption(t *testing.T) {
 func TestAccAWSEFSFileSystem_ProvisionedThroughputInMibps(t *testing.T) {
 	resourceName := "aws_efs_file_system.test"
 
-	resource.Test(t, resource.TestCase{
+	resource.ParallelTest(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
 		Providers:    testAccProviders,
 		CheckDestroy: testAccCheckEfsFileSystemDestroy,
@@ -215,7 +220,7 @@ func TestAccAWSEFSFileSystem_ProvisionedThroughputInMibps(t *testing.T) {
 				ResourceName:            resourceName,
 				ImportState:             true,
 				ImportStateVerify:       true,
-				ImportStateVerifyIgnore: []string{"reference_name", "creation_token"},
+				ImportStateVerifyIgnore: []string{"creation_token"},
 			},
 		},
 	})
@@ -224,7 +229,7 @@ func TestAccAWSEFSFileSystem_ProvisionedThroughputInMibps(t *testing.T) {
 func TestAccAWSEFSFileSystem_ThroughputMode(t *testing.T) {
 	resourceName := "aws_efs_file_system.test"
 
-	resource.Test(t, resource.TestCase{
+	resource.ParallelTest(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
 		Providers:    testAccProviders,
 		CheckDestroy: testAccCheckEfsFileSystemDestroy,
@@ -249,7 +254,124 @@ func TestAccAWSEFSFileSystem_ThroughputMode(t *testing.T) {
 				ResourceName:            resourceName,
 				ImportState:             true,
 				ImportStateVerify:       true,
-				ImportStateVerifyIgnore: []string{"reference_name", "creation_token"},
+				ImportStateVerifyIgnore: []string{"creation_token"},
+			},
+		},
+	})
+}
+
+func TestAccAWSEFSFileSystem_lifecyclePolicy(t *testing.T) {
+	resourceName := "aws_efs_file_system.foo-with-lifecycle-policy"
+
+	resource.ParallelTest(t, resource.TestCase{
+		PreCheck:     func() { testAccPreCheck(t) },
+		Providers:    testAccProviders,
+		CheckDestroy: testAccCheckEfsFileSystemDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccAWSEFSFileSystemConfigWithLifecyclePolicy(
+					"transition_to_ia",
+					"invalid_value",
+				),
+				ExpectError: regexp.MustCompile(`got invalid_value`),
+			},
+			{
+				Config: testAccAWSEFSFileSystemConfigWithLifecyclePolicy(
+					"transition_to_ia",
+					efs.TransitionToIARulesAfter30Days,
+				),
+				Check: resource.ComposeTestCheckFunc(
+					testAccCheckEfsFileSystem(resourceName),
+					testAccCheckEfsFileSystemLifecyclePolicy(resourceName, "badExpectation"),
+				),
+				ExpectError: regexp.MustCompile(`Expected: badExpectation`),
+			},
+			{
+				Config: testAccAWSEFSFileSystemConfigWithLifecyclePolicy(
+					"transition_to_ia",
+					efs.TransitionToIARulesAfter30Days,
+				),
+				Check: resource.ComposeTestCheckFunc(
+					testAccCheckEfsFileSystem(resourceName),
+					testAccCheckEfsFileSystemLifecyclePolicy(resourceName, efs.TransitionToIARulesAfter30Days),
+				),
+			},
+			{
+				ResourceName:      resourceName,
+				ImportState:       true,
+				ImportStateVerify: true,
+			},
+		},
+	})
+}
+
+func TestAccAWSEFSFileSystem_lifecyclePolicy_update(t *testing.T) {
+	resourceName := "aws_efs_file_system.foo-with-lifecycle-policy"
+
+	resource.ParallelTest(t, resource.TestCase{
+		PreCheck:     func() { testAccPreCheck(t) },
+		Providers:    testAccProviders,
+		CheckDestroy: testAccCheckEfsFileSystemDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccAWSEFSFileSystemConfigWithLifecyclePolicy(
+					"transition_to_ia",
+					efs.TransitionToIARulesAfter30Days,
+				),
+				Check: resource.ComposeTestCheckFunc(
+					testAccCheckEfsFileSystem(resourceName),
+					testAccCheckEfsFileSystemLifecyclePolicy(resourceName, efs.TransitionToIARulesAfter30Days),
+				),
+			},
+			{
+				Config: testAccAWSEFSFileSystemConfigWithLifecyclePolicy(
+					"transition_to_ia",
+					efs.TransitionToIARulesAfter90Days,
+				),
+				Check: resource.ComposeTestCheckFunc(
+					testAccCheckEfsFileSystem(resourceName),
+					testAccCheckEfsFileSystemLifecyclePolicy(resourceName, efs.TransitionToIARulesAfter90Days),
+				),
+			},
+			{
+				ResourceName:      resourceName,
+				ImportState:       true,
+				ImportStateVerify: true,
+			},
+		},
+	})
+}
+
+func TestAccAWSEFSFileSystem_lifecyclePolicy_removal(t *testing.T) {
+	resourceName := "aws_efs_file_system.foo-with-lifecycle-policy"
+
+	resource.ParallelTest(t, resource.TestCase{
+		PreCheck:     func() { testAccPreCheck(t) },
+		Providers:    testAccProviders,
+		CheckDestroy: testAccCheckEfsFileSystemDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccAWSEFSFileSystemConfigWithLifecyclePolicy(
+					"transition_to_ia",
+					efs.TransitionToIARulesAfter14Days,
+				),
+				Check: resource.ComposeTestCheckFunc(
+					testAccCheckEfsFileSystem(resourceName),
+					testAccCheckEfsFileSystemLifecyclePolicy(resourceName, efs.TransitionToIARulesAfter14Days),
+				),
+			},
+			{
+				Config: testAccAWSEFSFileSystemConfigRemovedLifecyclePolicy,
+				Check: resource.ComposeTestCheckFunc(
+					testAccCheckEfsFileSystem(resourceName),
+					testAccCheckEfsFileSystemLifecyclePolicy(resourceName, efs.TransitionToIARulesAfter14Days),
+				),
+				ExpectError: regexp.MustCompile(fmt.Sprintf(`Expected: %s`, efs.TransitionToIARulesAfter14Days)),
+			},
+			{
+				ResourceName:      resourceName,
+				ImportState:       true,
+				ImportStateVerify: true,
 			},
 		},
 	})
@@ -296,11 +418,7 @@ func testAccCheckEfsFileSystem(resourceID string) resource.TestCheckFunc {
 			FileSystemId: aws.String(rs.Primary.ID),
 		})
 
-		if err != nil {
-			return err
-		}
-
-		return nil
+		return err
 	}
 }
 
@@ -326,11 +444,7 @@ func testAccCheckEfsCreationToken(resourceID string, expectedToken string) resou
 				expectedToken, *fs.CreationToken)
 		}
 
-		if err != nil {
-			return err
-		}
-
-		return nil
+		return err
 	}
 }
 
@@ -393,6 +507,50 @@ func testAccCheckEfsFileSystemPerformanceMode(resourceID string, expectedMode st
 	}
 }
 
+func testAccCheckEfsFileSystemLifecyclePolicy(resourceID string, expectedVal string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		rs, ok := s.RootModule().Resources[resourceID]
+		if !ok {
+			return fmt.Errorf("Not found: %s", resourceID)
+		}
+
+		if rs.Primary.ID == "" {
+			return fmt.Errorf("No ID is set")
+		}
+
+		conn := testAccProvider.Meta().(*AWSClient).efsconn
+		resp, err := conn.DescribeFileSystems(&efs.DescribeFileSystemsInput{
+			FileSystemId: aws.String(rs.Primary.ID),
+		})
+		if err != nil {
+			return fmt.Errorf("Error describing EFS file systems: %s", err.Error())
+		}
+
+		fs := resp.FileSystems[0]
+
+		res, err := conn.DescribeLifecycleConfiguration(&efs.DescribeLifecycleConfigurationInput{
+			FileSystemId: fs.FileSystemId,
+		})
+		if err != nil {
+			return fmt.Errorf("Error describing lifecycle policy for EFS file system (%s): %s",
+				aws.StringValue(fs.FileSystemId), err.Error())
+		}
+		lp := res.LifecyclePolicies
+
+		newLP := make([]*map[string]interface{}, len(lp))
+
+		for i := 0; i < len(lp); i++ {
+			config := lp[i]
+			data := make(map[string]interface{})
+			newLP[i] = &data
+			if *config.TransitionToIA == expectedVal {
+				return nil
+			}
+		}
+		return fmt.Errorf("Lifecycle Policy mismatch.\nExpected: %s\nFound: %+v", expectedVal, lp)
+	}
+}
+
 const testAccAWSEFSFileSystemConfig = `
 resource "aws_efs_file_system" "foo" {
 	creation_token = "radeksimko"
@@ -401,33 +559,33 @@ resource "aws_efs_file_system" "foo" {
 
 func testAccAWSEFSFileSystemConfigPagedTags(rInt int) string {
 	return fmt.Sprintf(`
-	resource "aws_efs_file_system" "foo" {
-		tags {
-			Name = "foo-efs-%d"
-			Another = "tag"
-			Test = "yes"
-			User = "root"
-			Page = "1"
-			Environment = "prod"
-			CostCenter = "terraform"
-			AcceptanceTest = "PagedTags"
-			CreationToken = "radek"
-			PerfMode = "max"
-			Region = "us-west-2"
-		}
-	}
-	`, rInt)
+resource "aws_efs_file_system" "foo" {
+  tags = {
+    Name           = "foo-efs-%d"
+    Another        = "tag"
+    Test           = "yes"
+    User           = "root"
+    Page           = "1"
+    Environment    = "prod"
+    CostCenter     = "terraform"
+    AcceptanceTest = "PagedTags"
+    CreationToken  = "radek"
+    PerfMode       = "max"
+    Region         = "us-west-2"
+  }
+}
+`, rInt)
 }
 
 func testAccAWSEFSFileSystemConfigWithTags(rInt int) string {
 	return fmt.Sprintf(`
-	resource "aws_efs_file_system" "foo-with-tags" {
-		tags {
-			Name = "foo-efs-%d"
-			Another = "tag"
-		}
-	}
-	`, rInt)
+resource "aws_efs_file_system" "foo-with-tags" {
+  tags = {
+    Name    = "foo-efs-%d"
+    Another = "tag"
+  }
+}
+`, rInt)
 }
 
 const testAccAWSEFSFileSystemConfigWithPerformanceMode = `
@@ -444,7 +602,7 @@ resource "aws_kms_key" "foo" {
 }
 
 resource "aws_efs_file_system" "foo-with-kms" {
-  encrypted = true
+  encrypted  = true
   kms_key_id = "${aws_kms_key.foo.arn}"
 }
 `, rInt)
@@ -457,7 +615,7 @@ resource "aws_kms_key" "foo" {
 }
 
 resource "aws_efs_file_system" "foo-with-kms" {
-  encrypted = false
+  encrypted  = false
   kms_key_id = "${aws_kms_key.foo.arn}"
 }
 `, rInt)
@@ -479,3 +637,17 @@ resource "aws_efs_file_system" "test" {
 }
 `, provisionedThroughputInMibps)
 }
+
+func testAccAWSEFSFileSystemConfigWithLifecyclePolicy(lpName string, lpVal string) string {
+	return fmt.Sprintf(`
+resource "aws_efs_file_system" "foo-with-lifecycle-policy" {
+  lifecycle_policy {
+    %s = %q
+  }
+}
+`, lpName, lpVal)
+}
+
+const testAccAWSEFSFileSystemConfigRemovedLifecyclePolicy = `
+resource "aws_efs_file_system" "foo-with-lifecycle-policy" {}
+`

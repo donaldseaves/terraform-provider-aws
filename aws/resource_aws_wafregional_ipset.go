@@ -18,6 +18,9 @@ func resourceAwsWafRegionalIPSet() *schema.Resource {
 		Read:   resourceAwsWafRegionalIPSetRead,
 		Update: resourceAwsWafRegionalIPSetUpdate,
 		Delete: resourceAwsWafRegionalIPSetDelete,
+		Importer: &schema.ResourceImporter{
+			State: schema.ImportStatePassthrough,
+		},
 
 		Schema: map[string]*schema.Schema{
 			"name": {
@@ -103,7 +106,7 @@ func resourceAwsWafRegionalIPSetRead(d *schema.ResourceData, meta interface{}) e
 }
 
 func flattenWafIpSetDescriptorWR(in []*waf.IPSetDescriptor) []interface{} {
-	descriptors := make([]interface{}, len(in), len(in))
+	descriptors := make([]interface{}, len(in))
 
 	for i, descriptor := range in {
 		d := map[string]interface{}{

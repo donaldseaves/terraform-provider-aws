@@ -9,7 +9,7 @@ import (
 )
 
 func TestAccDataSourceAwsSnsTopic(t *testing.T) {
-	resource.Test(t, resource.TestCase{
+	resource.ParallelTest(t, resource.TestCase{
 		PreCheck:  func() { testAccPreCheck(t) },
 		Providers: testAccProviders,
 		Steps: []resource.TestStep{
@@ -50,10 +50,6 @@ func testAccDataSourceAwsSnsTopicCheck(name string) resource.TestCheckFunc {
 }
 
 const testAccDataSourceAwsSnsTopicConfig = `
-provider "aws" {
-  region = "us-west-2"
-}
-
 resource "aws_sns_topic" "tf_wrong1" {
   name = "wrong1"
 }

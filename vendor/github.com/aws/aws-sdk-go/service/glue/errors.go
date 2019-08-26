@@ -28,6 +28,12 @@ const (
 	// Too many jobs are being run concurrently.
 	ErrCodeConcurrentRunsExceededException = "ConcurrentRunsExceededException"
 
+	// ErrCodeConditionCheckFailureException for service response error code
+	// "ConditionCheckFailureException".
+	//
+	// A specified condition was not satisfied.
+	ErrCodeConditionCheckFailureException = "ConditionCheckFailureException"
+
 	// ErrCodeCrawlerNotRunningException for service response error code
 	// "CrawlerNotRunningException".
 	//
@@ -75,6 +81,12 @@ const (
 	//
 	// The input provided was not valid.
 	ErrCodeInvalidInputException = "InvalidInputException"
+
+	// ErrCodeMLTransformNotReadyException for service response error code
+	// "MLTransformNotReadyException".
+	//
+	// The machine learning transform is not ready to run.
+	ErrCodeMLTransformNotReadyException = "MLTransformNotReadyException"
 
 	// ErrCodeNoScheduleException for service response error code
 	// "NoScheduleException".

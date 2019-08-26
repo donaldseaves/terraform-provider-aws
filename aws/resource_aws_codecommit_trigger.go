@@ -124,17 +124,13 @@ func resourceAwsCodeCommitTriggerDelete(d *schema.ResourceData, meta interface{}
 
 	_, err := conn.PutRepositoryTriggers(input)
 
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return err
 }
 
 func expandAwsCodeCommitTriggers(configured []interface{}) []*codecommit.RepositoryTrigger {
 	triggers := make([]*codecommit.RepositoryTrigger, 0, len(configured))
 	// Loop over our configured triggers and create
-	// an array of aws-sdk-go compatabile objects
+	// an array of aws-sdk-go compatible objects
 	for _, lRaw := range configured {
 		data := lRaw.(map[string]interface{})
 		t := &codecommit.RepositoryTrigger{

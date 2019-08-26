@@ -11,6 +11,27 @@ import (
 	"github.com/hashicorp/terraform/terraform"
 )
 
+func TestAccAWSAPIGatewayAccount_importBasic(t *testing.T) {
+	resourceName := "aws_api_gateway_account.test"
+
+	resource.ParallelTest(t, resource.TestCase{
+		PreCheck:     func() { testAccPreCheck(t) },
+		Providers:    testAccProviders,
+		CheckDestroy: testAccCheckAWSAPIGatewayAccountDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccAWSAPIGatewayAccountConfig_empty,
+			},
+
+			{
+				ResourceName:      resourceName,
+				ImportState:       true,
+				ImportStateVerify: true,
+			},
+		},
+	})
+}
+
 func TestAccAWSAPIGatewayAccount_basic(t *testing.T) {
 	var conf apigateway.Account
 
@@ -21,7 +42,7 @@ func TestAccAWSAPIGatewayAccount_basic(t *testing.T) {
 	expectedRoleArn_first := regexp.MustCompile(":role/" + firstName + "$")
 	expectedRoleArn_second := regexp.MustCompile(":role/" + secondName + "$")
 
-	resource.Test(t, resource.TestCase{
+	resource.ParallelTest(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
 		Providers:    testAccProviders,
 		CheckDestroy: testAccCheckAWSAPIGatewayAccountDestroy,
@@ -117,8 +138,9 @@ resource "aws_api_gateway_account" "test" {
 }
 
 resource "aws_iam_role" "cloudwatch" {
-    name = "%s"
-    assume_role_policy = <<EOF
+  name = "%s"
+
+  assume_role_policy = <<EOF
 {
   "Version": "2012-10-17",
   "Statement": [
@@ -136,9 +158,10 @@ EOF
 }
 
 resource "aws_iam_role_policy" "cloudwatch" {
-    name = "default"
-    role = "${aws_iam_role.cloudwatch.id}"
-    policy = <<EOF
+  name = "default"
+  role = "${aws_iam_role.cloudwatch.id}"
+
+  policy = <<EOF
 {
     "Version": "2012-10-17",
     "Statement": [
@@ -169,8 +192,9 @@ resource "aws_api_gateway_account" "test" {
 }
 
 resource "aws_iam_role" "second" {
-    name = "%s"
-    assume_role_policy = <<EOF
+  name = "%s"
+
+  assume_role_policy = <<EOF
 {
   "Version": "2012-10-17",
   "Statement": [
@@ -188,9 +212,10 @@ EOF
 }
 
 resource "aws_iam_role_policy" "cloudwatch" {
-    name = "default"
-    role = "${aws_iam_role.second.id}"
-    policy = <<EOF
+  name = "default"
+  role = "${aws_iam_role.second.id}"
+
+  policy = <<EOF
 {
     "Version": "2012-10-17",
     "Statement": [
